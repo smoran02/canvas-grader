@@ -25,8 +25,8 @@ Your goal primarily is to grade effort. IF THE WORK IS REASONABLY ATTEMPTED, GIV
 ### RUBRIC
 
 **PART 1: The Message (Max 7 points)**
-- **7 pts (Full):** Thoughtful, well-written, meets minimum length (90+ words).
-- **2 pts (Partial):** Too short (< 90 words), or VERY poorly written.
+- **7 pts (Full):** Thoughtful, well-written, meets minimum length (80+ words).
+- **2 pts (Partial):** Too short (< 80 words), or VERY poorly written.
 - **0 pts (None):** Missing, extremely short, or egregious errors.
 
 **PART 2: The Responses (Max 3 points)**
@@ -139,7 +139,7 @@ for sub in submissions:
     llm_input = f"""
     STUDENT: [ANONYMOUS]
     --- PART 1: MESSAGE ---
-    WORD COUNT: {word_count} words (90+ required)
+    WORD COUNT: {word_count} words (80+ required)
     CONTENT: {anon_post}
     --- PART 2: RESPONSES ---
     COUNT: {len(anon_replies)} replies found (2+ required)
