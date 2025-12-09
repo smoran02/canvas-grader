@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_URL = os.getenv("CANVAS_API_URL")
-API_KEY = os.getenv("CANVAS_API_KEY")
+API_KEY = os.getenv("CANVAS_TEST_KEY")
 COURSE_ID = 3532173
 
 canvas = Canvas(API_URL, API_KEY)
