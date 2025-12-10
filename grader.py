@@ -4,11 +4,13 @@ import pandas as pd
 from canvasapi import Canvas
 from openai import OpenAI
 from dotenv import load_dotenv
+import math
 
 load_dotenv()
 
 COURSE_ID = 3532173
-ASSIGNMENT_ID = 38526540
+# ASSIGNMENT_ID = 38526540
+ASSIGNMENT_ID = 38526543
 DRY_RUN = False
 MODEL = "gpt-4o-mini"
 
@@ -103,6 +105,9 @@ for sub in submissions:
     if user_id not in active_student_ids:
         continue
 
+    if count >= 15:
+        break
+
     if DRY_RUN and count >= 15:
         print("\n[DRY RUN] Stopping early.")
         break
@@ -112,6 +117,7 @@ for sub in submissions:
     sis_id = user_info.get('sis_user_id', user_info.get('login_id', f"CANVAS_{user_id}"))
     
     work = student_work.get(user_id)
+
     if not work or (not work['post'] and not work['replies']):
         reason = "No submission found." if not work else "No content found."
         print(f"   ❌ {real_name}: {reason} (0/10)")
@@ -119,13 +125,19 @@ for sub in submissions:
             "Student": real_name,
             "SIS ID": sis_id,
             "Total Score": 0,
-            "Feedback": "No content found."
+            "Feedback": reason,
+            "Word Count": 0,
+            "Status": "Missing",
+            "Days Late": 0
         })
         # GRADES POSTED HERE
+        # DONT THINK I NEED THIS FOR MISSING SUBMISSIONS
         # if not DRY_RUN:
         #     try:
-        #         sub.edit(submission={'posted_grade': 0}, comment={'text_comment': "No content found."})
-        #     except: pass
+        #         sub.edit(submission={'late_policy_status': 'missing'},
+        #                       comment={'text_comment': reason})
+        #     except:
+        #         print(f"Could not update Canvas: {e}")
         count += 1
         continue
 
@@ -140,7 +152,7 @@ for sub in submissions:
     clean_text = raw_post.replace('<p>', ' ').replace('</p>', ' ').replace('<br>', ' ')
     word_count = len(clean_text.split())
 
-    llm_input = f"""j
+    llm_input = f"""
     STUDENT: [ANONYMOUS]
     --- PART 1: MESSAGE ---
     WORD COUNT: {word_count} words (80+ required)
@@ -170,20 +182,33 @@ for sub in submissions:
         if final_score >= 10:
             final_feedback = ""
 
+        
+        is_late = sub.late if hasattr(sub, 'late') else False
+        seconds_late = getattr(sub, 'seconds_late', 0)
+        days_late = math.ceil(seconds_late / 86400) if seconds_late > 0 else 0
+        
+        status = "Late" if is_late else "On Time"
+        policy_status = "late" if is_late else "none"
+
         graded_data.append({
             "Student": real_name,
             "SIS ID": sis_id,
             "Total Score": final_score,
             "Feedback": final_feedback,
-            "Word Count": word_count
+            "Word Count": word_count,
+            "Status": status,
+            "Days Late": days_late
         })
 
         # GRADES POSTED HERE   
-        # if not DRY_RUN:
-        #     sub.edit(
-        #         submission={'posted_grade': final_score}, 
-        #         comment={'text_comment': final_feedback}
-        #     )
+        if not DRY_RUN:
+            sub.edit(
+                submission={'posted_grade': final_score, 
+                            'late_policy_status': policy_status,
+                            'seconds_late_override': seconds_late
+                },
+                comment={'text_comment': final_feedback}
+            )
 
         count += 1
 
@@ -193,10 +218,10 @@ for sub in submissions:
 if graded_data:
     df = pd.DataFrame(graded_data)
 
-    df = df.sort_values(by="Student", ascending=True)
+    # df = df.sort_values(by="Student", ascending=True)
     filename = "grades_test.csv" if DRY_RUN else f"grades_{ASSIGNMENT_ID}.csv"
     df.to_csv(filename, index=False)
     print(f"\n✅ Success! Grades exported to: {filename}")
-    print(df[['Student', 'Total Score', 'Feedback']])
+    print(df[['Student', 'Total Score', 'Status', 'Feedback']])
 else:
     print("No submissions found.")
