@@ -12,10 +12,14 @@ ASSIGNMENT_ID = 38526540
 DRY_RUN = False
 MODEL = "gpt-4o-mini"
 
-canvas = Canvas(os.getenv("CANVAS_API_URL"), os.getenv("CANVAS_TEST_KEY"))
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-course = canvas.get_course(COURSE_ID)
-assignment = course.get_assignment(ASSIGNMENT_ID)
+try:
+    canvas = Canvas(os.getenv("CANVAS_API_URL"), os.getenv("CANVAS_TEST_KEY"))
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    course = canvas.get_course(COURSE_ID)
+    assignment = course.get_assignment(ASSIGNMENT_ID)
+except Exception as e:
+    print(f"Initial setup failed: {e}")
+    exit()
 
 SYSTEM_PROMPT = """
 You are a grader for CPSC120A, an intro programming class at Cal State Fullerton.
@@ -43,6 +47,17 @@ Return strictly valid JSON:
     "feedback": "<string: ONLY IF total_score IS NOT 10, 1 sentence briefly explaining why points were lost.>"
 }
 """
+
+print("\nFetching active student enrollments...")
+active_student_ids = set()
+enrollments = course.get_users(enrollment_status='active', include=['enrollments'])
+
+for user in enrollments:
+    is_student = any(e['type'] == 'StudentEnrollment' and e['enrollment_state'] == 'active' for e in user.enrollments)
+    if is_student:
+        active_student_ids.add(user.id)
+
+print(f"Found {len(active_student_ids)} active student IDs.")
 
 print(f"\nScanning discussion thread for {assignment.name}...")
 student_work = {}
@@ -83,45 +98,34 @@ graded_data = []
 count = 0
 
 for sub in submissions:
+    user_id = sub.user_id
+
+    if user_id not in active_student_ids:
+        continue
+
     if DRY_RUN and count >= 15:
         print("\n[DRY RUN] Stopping early.")
         break
 
-    real_name = sub.user['name'] if hasattr(sub, 'user') else f"User {sub.user_id}"
-    user_id = sub.user_id
+    user_info = getattr(sub, "user", {})
+    real_name = user_info.get('name', f"User {user_id}")
+    sis_id = user_info.get('sis_user_id', user_info.get('login_id', f"CANVAS_{user_id}"))
     
-    sis_id = getattr(sub, 'user', {}).get('sis_user_id', None)
-    if not sis_id:
-        sis_id = getattr(sub, 'user', {}).get('login_id', f"CANVAS_{user_id}")
-
-    if user_id not in student_work:
-        print(f"   ❌ {real_name}: No submission found (0/10)")
-        graded_data.append({
-            "Student": real_name,
-            "SIS ID": sis_id,
-            "Total Score": 0,
-            "Feedback": "No submission found."
-        })
-        if not DRY_RUN:
-            try:
-                sub.edit(submission={'posted_grade': 0}, comment={'text_comment': "No submission found."})
-            except: pass
-        count += 1
-        continue
-    
-    work = student_work[user_id]
-    if not work['post'] and not work['replies']:
-        print(f"   ❌ {real_name}: Empty submission (0/10)")
+    work = student_work.get(user_id)
+    if not work or (not work['post'] and not work['replies']):
+        reason = "No submission found." if not work else "No content found."
+        print(f"   ❌ {real_name}: {reason} (0/10)")
         graded_data.append({
             "Student": real_name,
             "SIS ID": sis_id,
             "Total Score": 0,
             "Feedback": "No content found."
         })
-        if not DRY_RUN:
-            try:
-                sub.edit(submission={'posted_grade': 0}, comment={'text_comment': "No content found."})
-            except: pass
+        # GRADES POSTED HERE
+        # if not DRY_RUN:
+        #     try:
+        #         sub.edit(submission={'posted_grade': 0}, comment={'text_comment': "No content found."})
+        #     except: pass
         count += 1
         continue
 
@@ -136,7 +140,7 @@ for sub in submissions:
     clean_text = raw_post.replace('<p>', ' ').replace('</p>', ' ').replace('<br>', ' ')
     word_count = len(clean_text.split())
 
-    llm_input = f"""
+    llm_input = f"""j
     STUDENT: [ANONYMOUS]
     --- PART 1: MESSAGE ---
     WORD COUNT: {word_count} words (80+ required)
@@ -174,8 +178,7 @@ for sub in submissions:
             "Word Count": word_count
         })
 
-        # DO NOT DO THIS
-        # THIS ACTUALLY CHANGES THE GRADES   
+        # GRADES POSTED HERE   
         # if not DRY_RUN:
         #     sub.edit(
         #         submission={'posted_grade': final_score}, 
@@ -189,15 +192,6 @@ for sub in submissions:
 
 if graded_data:
     df = pd.DataFrame(graded_data)
-    
-    df = df.sort_values(by="Total Score", ascending=False)
-    
-    if df['SIS ID'].astype(str).str.contains("CANVAS_").all() == False:
-        print("\nDeduplicating by Student CWID...")
-        df = df.drop_duplicates(subset=["SIS ID"], keep="first")
-    else:
-        print("\nDeduplicating by Student Name...")
-        df = df.drop_duplicates(subset=["Student"], keep="first")
 
     df = df.sort_values(by="Student", ascending=True)
     filename = "grades_test.csv" if DRY_RUN else f"grades_{ASSIGNMENT_ID}.csv"
